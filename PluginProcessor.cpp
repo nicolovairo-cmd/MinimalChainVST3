@@ -778,4 +778,3 @@ createPluginFilter()
 {
     return new MinimalChainAudioProcessor();
 }
-
