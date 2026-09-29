@@ -81,7 +81,7 @@ public:
                 juce::NormalisableRange<float>(
                     20.0f,
                     20000.0f),
-                12000.0f));
+                15000.0f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -90,7 +90,7 @@ public:
                 juce::NormalisableRange<float>(
                     20.0f,
                     5000.0f),
-                40.0f));
+                900.0f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -98,7 +98,7 @@ public:
                 "Distortion Tone",
                 0.0f,
                 1.0f,
-                0.5f));
+                0.80f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -106,7 +106,7 @@ public:
                 "Distortion Amount",
                 0.0f,
                 1.0f,
-                0.15f));
+                0.12f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -114,7 +114,7 @@ public:
                 "Compressor Input",
                 0.0f,
                 1.0f,
-                0.5f));
+                0.50f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -130,7 +130,7 @@ public:
                 "Global Dry Wet",
                 0.0f,
                 1.0f,
-                1.0f));
+                0.50f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -646,17 +646,16 @@ public:
     }
 
     //==========================================================================
-   juce::AudioProcessorEditor* createEditor() override
-{
-    return new juce::GenericAudioProcessorEditor(
-        *this);
-}
+    juce::AudioProcessorEditor* createEditor() override
+    {
+        return new juce::GenericAudioProcessorEditor(
+            *this);
+    }
 
-bool hasEditor() const override
-{
-    return true;
-}
-
+    bool hasEditor() const override
+    {
+        return true;
+    }
 
     //==========================================================================
     const juce::String getName() const override
@@ -779,3 +778,4 @@ createPluginFilter()
 {
     return new MinimalChainAudioProcessor();
 }
+
