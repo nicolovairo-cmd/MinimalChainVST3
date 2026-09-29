@@ -1,22 +1,10 @@
-name: Build Minimal Chain VST3
-
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout project
-        uses: actions/checkout@v4
-
-      - name: Checkout JUCE
-        uses: actions/checkout@v4
-        with:
-          repository: juce-framework/JUCE
-          path: JUCE
-          fetch-depth: 1
+- name: Checkout JUCE 7.0.5
+  uses: actions/checkout@v4
+  with:
+    repository: juce-framework/JUCE
+    ref: 7.0.5
+    path: JUCE
+    fetch-depth: 1
 
       - name: Configure CMake
         shell: pwsh
