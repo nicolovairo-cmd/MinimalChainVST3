@@ -1,201 +1,9 @@
 #include <JuceHeader.h>
 
 //==============================================================================
-// Pitch shifter lo-fi basato su delay granulare a due teste.
-// Non usa librerie esterne.
-//==============================================================================
-class LoFiPitchShifter
-{
-public:
-    void prepare(double newSampleRate,
-                 int maximumBlockSize,
-                 int numberOfChannels)
-    {
-        sampleRate = newSampleRate;
-        numChannels = juce::jlimit(1, 2, numberOfChannels);
-
-        const int bufferSize =
-            juce::nextPowerOfTwo(
-                static_cast<int>(sampleRate * 2.0));
-
-        buffer.setSize(
-            numChannels,
-            bufferSize);
-
-        buffer.clear();
-
-        size = bufferSize;
-        writePosition = 0;
-
-        phase[0] = 0.0f;
-        phase[1] = 0.5f;
-
-        setPitchSemitones(0.0f);
-
-        juce::ignoreUnused(maximumBlockSize);
-    }
-
-    void reset()
-    {
-        buffer.clear();
-
-        writePosition = 0;
-
-        phase[0] = 0.0f;
-        phase[1] = 0.5f;
-    }
-
-    void setPitchSemitones(float newSemitones)
-    {
-        semitones =
-            juce::jlimit(
-                -12.0f,
-                12.0f,
-                newSemitones);
-
-        pitchRatio =
-            std::pow(
-                2.0f,
-                semitones / 12.0f);
-    }
-
-    float processSample(float input,
-                        int channel)
-    {
-        if (channel < 0 || channel >= numChannels)
-            return input;
-
-        buffer.setSample(
-            channel,
-            writePosition,
-            input);
-
-        if (std::abs(semitones) < 0.001f)
-        {
-            advanceWritePosition();
-            return input;
-        }
-
-        constexpr float minimumDelay = 32.0f;
-        constexpr float maximumDelay = 1536.0f;
-
-        const float delayRange =
-            maximumDelay - minimumDelay;
-
-        float output = 0.0f;
-
-        for (int head = 0; head < 2; ++head)
-        {
-            const float localPhase =
-                std::fmod(
-                    phase[head],
-                    1.0f);
-
-            const float delay =
-                minimumDelay
-                + localPhase * delayRange;
-
-            const float readPosition =
-                static_cast<float>(writePosition)
-                - delay
-                + static_cast<float>(size);
-
-            const float sample =
-                readLinear(
-                    channel,
-                    readPosition);
-
-            // Crossfade tra le due teste di lettura.
-            const float gain =
-                head == 0
-                    ? std::cos(localPhase
-                               * juce::MathConstants<float>::halfPi)
-                    : std::sin(localPhase
-                               * juce::MathConstants<float>::halfPi);
-
-            output += sample * gain;
-
-            // La velocità di movimento della linea di delay
-            // determina il pitch percepito.
-            const float phaseSpeed =
-                std::abs(1.0f - pitchRatio)
-                / delayRange;
-
-            if (pitchRatio > 1.0f)
-                phase[head] -= phaseSpeed;
-            else
-                phase[head] += phaseSpeed;
-
-            if (phase[head] < 0.0f)
-                phase[head] += 1.0f;
-
-            if (phase[head] >= 1.0f)
-                phase[head] -= 1.0f;
-        }
-
-        advanceWritePosition();
-
-        return output * 0.7071f;
-    }
-
-private:
-    float readLinear(int channel,
-                     float position) const
-    {
-        while (position < 0.0f)
-            position += static_cast<float>(size);
-
-        while (position >= static_cast<float>(size))
-            position -= static_cast<float>(size);
-
-        const int indexA =
-            static_cast<int>(position);
-
-        const int indexB =
-            (indexA + 1) % size;
-
-        const float fraction =
-            position - static_cast<float>(indexA);
-
-        const float sampleA =
-            buffer.getSample(
-                channel,
-                indexA);
-
-        const float sampleB =
-            buffer.getSample(
-                channel,
-                indexB);
-
-        return sampleA
-             + fraction * (sampleB - sampleA);
-    }
-
-    void advanceWritePosition()
-    {
-        ++writePosition;
-
-        if (writePosition >= size)
-            writePosition = 0;
-    }
-
-    juce::AudioBuffer<float> buffer;
-
-    double sampleRate = 44100.0;
-
-    int size = 0;
-    int numChannels = 2;
-    int writePosition = 0;
-
-    float semitones = 0.0f;
-    float pitchRatio = 1.0f;
-
-    float phase[2] = { 0.0f, 0.5f };
-};
-
-//==============================================================================
 // Audio processor
 //==============================================================================
+
 class MinimalChainAudioProcessor : public juce::AudioProcessor
 {
 public:
@@ -256,15 +64,15 @@ public:
                 1.0f,
                 0.25f));
 
+        // Unico controllo per la modulazione imprevedibile del delay.
         parameterList.push_back(
             std::make_unique<FloatParameter>(
-                "delayPitch",
-                "Delay Pitch",
+                "delayChaos",
+                "Delay Chaos",
                 juce::NormalisableRange<float>(
-                    -12.0f,
-                    12.0f,
-                    0.01f),
-                0.0f));
+                    0.0f,
+                    1.0f),
+                0.20f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -341,8 +149,9 @@ public:
     }
 
     //==========================================================================
-    void prepareToPlay(double newSampleRate,
-                       int samplesPerBlock) override
+    void prepareToPlay(
+        double newSampleRate,
+        int samplesPerBlock) override
     {
         sampleRate = newSampleRate;
 
@@ -365,13 +174,6 @@ public:
         delay.prepare(spec);
         delay.reset();
 
-        pitchShifter.prepare(
-            newSampleRate,
-            samplesPerBlock,
-            2);
-
-        pitchShifter.reset();
-
         lowPass.prepare(spec);
         highPass.prepare(spec);
 
@@ -384,16 +186,24 @@ public:
         highPass.setType(
             juce::dsp::StateVariableTPTFilterType::highpass);
 
-        lowPass.setCutoffFrequency(12000.0f);
-        highPass.setCutoffFrequency(40.0f);
+        lowPass.setCutoffFrequency(
+            12000.0f);
+
+        highPass.setCutoffFrequency(
+            40.0f);
+
+        modulationPhase = 0.0f;
+        randomValue = 0.0f;
+        randomTarget = 0.0f;
+        randomCounter = 0;
 
         envelope = 0.0f;
     }
 
+    //==========================================================================
     void releaseResources() override
     {
         delay.reset();
-        pitchShifter.reset();
 
         lowPass.reset();
         highPass.reset();
@@ -442,12 +252,15 @@ public:
         const int channelsToProcess =
             juce::jmin(
                 juce::jmin(numberOfChannels, 2),
-                2);
+                juce::jmin(inputChannels, outputChannels));
 
         if (channelsToProcess <= 0)
             return;
 
-        // Copia del segnale originale per il dry/wet globale.
+        //======================================================================
+        // Salvataggio del segnale dry originale
+        //======================================================================
+
         dryBuffer.setSize(
             numberOfChannels,
             numberOfSamples,
@@ -495,9 +308,10 @@ public:
             return 0.0f;
         };
 
-        //==========================================================================
-        // Delay con pitch shifter nel feedback
-        //==========================================================================
+        //======================================================================
+        // Parametri del delay
+        //======================================================================
+
         const int delaySamples =
             juce::jlimit(
                 1,
@@ -520,19 +334,64 @@ public:
                 1.0f,
                 getParameter("delayMix"));
 
-        const float delayPitch =
+        const float delayChaos =
             juce::jlimit(
-                -12.0f,
-                12.0f,
-                getParameter("delayPitch"));
+                0.0f,
+                1.0f,
+                getParameter("delayChaos"));
 
-        pitchShifter.setPitchSemitones(
-            delayPitch);
+        //======================================================================
+        // Delay con modulazione imprevedibile
+        //======================================================================
 
         for (int sample = 0;
              sample < numberOfSamples;
              ++sample)
         {
+            const float sineModulation =
+                std::sin(modulationPhase);
+
+            // Genera un nuovo obiettivo casuale ogni 100 millisecondi.
+            if (randomCounter <= 0)
+            {
+                randomTarget =
+                    random.nextFloat() * 2.0f - 1.0f;
+
+                randomCounter =
+                    static_cast<int>(
+                        sampleRate * 0.1);
+            }
+
+            --randomCounter;
+
+            // Rende la variazione casuale graduale.
+            randomValue +=
+                0.0025f
+                * (randomTarget - randomValue);
+
+            // A valori bassi prevale la sinusoide.
+            // A valori alti aumenta la componente casuale.
+            const float modulation =
+                sineModulation * (1.0f - delayChaos)
+                + randomValue * delayChaos;
+
+            // Variazione massima pari al 20% del tempo di delay.
+            const float modulationRange =
+                static_cast<float>(
+                    delaySamples)
+                * 0.20f;
+
+            const float modulatedDelay =
+                juce::jlimit(
+                    1.0f,
+                    static_cast<float>(
+                        sampleRate * 2.0 - 1.0),
+                    static_cast<float>(
+                        delaySamples)
+                    + modulation
+                      * modulationRange
+                      * delayChaos);
+
             for (int channel = 0;
                  channel < channelsToProcess;
                  ++channel)
@@ -545,36 +404,46 @@ public:
                 const float delayed =
                     delay.popSample(
                         channel,
-                        static_cast<float>(
-                            delaySamples));
+                        modulatedDelay);
 
-                const float pitchedFeedback =
-                    pitchShifter.processSample(
-                        delayed,
-                        channel);
+                const float feedbackSample =
+                    dry
+                    + delayed * delayFeedback;
 
-                // Il segnale pitch-shifted rientra nel feedback.
                 delay.pushSample(
                     channel,
-                    dry
-                    + pitchedFeedback
-                      * delayFeedback);
+                    feedbackSample);
 
-                // L'uscita del delay è pitch-shifted.
                 const float output =
                     dry * (1.0f - delayMix)
-                    + pitchedFeedback * delayMix;
+                    + delayed * delayMix;
 
                 buffer.setSample(
                     channel,
                     sample,
                     output);
             }
+
+            // Frequenza fissa della modulazione:
+            // circa 0.35 Hz.
+            modulationPhase +=
+                juce::MathConstants<float>::twoPi
+                * 0.35f
+                / static_cast<float>(
+                    sampleRate);
+
+            if (modulationPhase >=
+                juce::MathConstants<float>::twoPi)
+            {
+                modulationPhase -=
+                    juce::MathConstants<float>::twoPi;
+            }
         }
 
-        //==========================================================================
+        //======================================================================
         // Filtri
-        //==========================================================================
+        //======================================================================
+
         lowPass.setCutoffFrequency(
             juce::jlimit(
                 20.0f,
@@ -601,9 +470,10 @@ public:
         lowPass.process(filterContext);
         highPass.process(filterContext);
 
-        //==========================================================================
-        // Distorsione senza distMix
-        //==========================================================================
+        //======================================================================
+        // Distorsione
+        //======================================================================
+
         const float tone =
             juce::jlimit(
                 0.0f,
@@ -640,9 +510,10 @@ public:
             }
         }
 
-        //==========================================================================
+        //======================================================================
         // Compressore
-        //==========================================================================
+        //======================================================================
+
         const float inputGain =
             juce::Decibels::decibelsToGain(
                 juce::jmap(
@@ -732,9 +603,10 @@ public:
             }
         }
 
-        //==========================================================================
+        //======================================================================
         // Dry/wet globale e volume
-        //==========================================================================
+        //======================================================================
+
         const float globalDryWet =
             juce::jlimit(
                 0.0f,
@@ -784,6 +656,7 @@ public:
         return false;
     }
 
+    //==========================================================================
     const juce::String getName() const override
     {
         return "Minimal Chain";
@@ -809,6 +682,7 @@ public:
         return 2.0;
     }
 
+    //==========================================================================
     int getNumPrograms() override
     {
         return 1;
@@ -866,6 +740,7 @@ public:
     }
 
 private:
+    //==========================================================================
     juce::AudioProcessorValueTreeState parameters;
 
     juce::AudioBuffer<float> dryBuffer;
@@ -874,8 +749,6 @@ private:
         200000
     };
 
-    LoFiPitchShifter pitchShifter;
-
     juce::dsp::StateVariableTPTFilter<float>
         lowPass;
 
@@ -883,10 +756,22 @@ private:
         highPass;
 
     double sampleRate = 44100.0;
+
+    // Parametri della modulazione.
+    float modulationPhase = 0.0f;
+    float randomValue = 0.0f;
+    float randomTarget = 0.0f;
+
+    int randomCounter = 0;
+
+    juce::Random random;
+
+    // Stato del compressore.
     float envelope = 0.0f;
 };
 
 //==============================================================================
+
 juce::AudioProcessor* JUCE_CALLTYPE
 createPluginFilter()
 {
