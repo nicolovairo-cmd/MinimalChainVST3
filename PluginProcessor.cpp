@@ -42,11 +42,13 @@ public:
         parameterList.push_back(
             std::make_unique<FloatParameter>(
                 "delayTime",
-                "Delay Time",
-                juce::NormalisableRange<float>(
-                    1.0f,
-                    2000.0f),
-                350.0f));
+"Time",
+juce::NormalisableRange<float>(
+    1.0f,
+    2000.0f,
+    0.0f,
+    0.3f),
+350.0f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -77,20 +79,24 @@ public:
         parameterList.push_back(
             std::make_unique<FloatParameter>(
                 "lpCutoff",
-                "Low Pass",
-                juce::NormalisableRange<float>(
-                    20.0f,
-                    20000.0f),
-                15000.0f));
+"Low Pass",
+juce::NormalisableRange<float>(
+    20.0f,
+    20000.0f,
+    0.0f,
+    0.3f),
+15000.0f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
                 "hpCutoff",
-                "High Pass",
-                juce::NormalisableRange<float>(
-                    20.0f,
-                    5000.0f),
-                900.0f));
+"High Pass",
+juce::NormalisableRange<float>(
+    20.0f,
+    5000.0f,
+    0.0f,
+    0.3f),
+900.0f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
