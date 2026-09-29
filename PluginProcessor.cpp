@@ -1,5 +1,9 @@
 #include <JuceHeader.h>
 
+//==============================================================================
+// Audio processor
+//==============================================================================
+
 class MinimalChainAudioProcessor : public juce::AudioProcessor
 {
 public:
@@ -24,12 +28,15 @@ public:
 
     ~MinimalChainAudioProcessor() override = default;
 
+    //==========================================================================
     static juce::AudioProcessorValueTreeState::ParameterLayout
     createParameterLayout()
     {
-        using FloatParameter = juce::AudioParameterFloat;
+        using FloatParameter =
+            juce::AudioParameterFloat;
 
-        std::vector<std::unique_ptr<juce::RangedAudioParameter>>
+        std::vector<
+            std::unique_ptr<juce::RangedAudioParameter>>
             parameterList;
 
         parameterList.push_back(
@@ -56,6 +63,16 @@ public:
                 0.0f,
                 1.0f,
                 0.25f));
+
+        // Unico controllo per la modulazione imprevedibile del delay.
+        parameterList.push_back(
+            std::make_unique<FloatParameter>(
+                "delayChaos",
+                "Delay Chaos",
+                juce::NormalisableRange<float>(
+                    0.0f,
+                    1.0f),
+                0.20f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -93,14 +110,6 @@ public:
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
-                "distMix",
-                "Distortion Mix",
-                0.0f,
-                1.0f,
-                0.35f));
-
-        parameterList.push_back(
-            std::make_unique<FloatParameter>(
                 "compInput",
                 "Compressor Input",
                 0.0f,
@@ -115,7 +124,6 @@ public:
                 1.0f,
                 0.25f));
 
-        // Dry/Wet globale: 0% = dry, 100% = wet
         parameterList.push_back(
             std::make_unique<FloatParameter>(
                 "globalDryWet",
@@ -124,7 +132,6 @@ public:
                 1.0f,
                 1.0f));
 
-        // Volume globale: da -12 dB a +12 dB
         parameterList.push_back(
             std::make_unique<FloatParameter>(
                 "outputGain",
@@ -141,6 +148,7 @@ public:
         };
     }
 
+    //==========================================================================
     void prepareToPlay(
         double newSampleRate,
         int samplesPerBlock) override
@@ -160,7 +168,8 @@ public:
         dryBuffer.clear();
 
         delay.setMaximumDelayInSamples(
-            static_cast<int>(newSampleRate * 2.05));
+            static_cast<int>(
+                newSampleRate * 2.05));
 
         delay.prepare(spec);
         delay.reset();
@@ -177,20 +186,32 @@ public:
         highPass.setType(
             juce::dsp::StateVariableTPTFilterType::highpass);
 
-        lowPass.setCutoffFrequency(12000.0f);
-        highPass.setCutoffFrequency(40.0f);
+        lowPass.setCutoffFrequency(
+            12000.0f);
+
+        highPass.setCutoffFrequency(
+            40.0f);
+
+        modulationPhase = 0.0f;
+        randomValue = 0.0f;
+        randomTarget = 0.0f;
+        randomCounter = 0;
 
         envelope = 0.0f;
     }
 
+    //==========================================================================
     void releaseResources() override
     {
         delay.reset();
+
         lowPass.reset();
         highPass.reset();
+
         dryBuffer.clear();
     }
 
+    //==========================================================================
     bool isBusesLayoutSupported(
         const BusesLayout& layouts) const override
     {
@@ -207,6 +228,7 @@ public:
             || input == juce::AudioChannelSet::stereo();
     }
 
+    //==========================================================================
     void processBlock(
         juce::AudioBuffer<float>& buffer,
         juce::MidiBuffer& midiMessages) override
@@ -228,20 +250,36 @@ public:
             getTotalNumOutputChannels();
 
         const int channelsToProcess =
-            juce::jmin(numberOfChannels, 2);
+            juce::jmin(
+                juce::jmin(numberOfChannels, 2),
+                juce::jmin(inputChannels, outputChannels));
 
         if (channelsToProcess <= 0)
             return;
 
-        // Salva una copia del segnale originale.
+        //======================================================================
+        // Salvataggio del segnale dry originale
+        //======================================================================
+
         dryBuffer.setSize(
-            2,
+            numberOfChannels,
             numberOfSamples,
             false,
             false,
             true);
 
-        dryBuffer.makeCopyOf(buffer, true);
+        for (int channel = 0;
+             channel < numberOfChannels;
+             ++channel)
+        {
+            dryBuffer.copyFrom(
+                channel,
+                0,
+                buffer,
+                channel,
+                0,
+                numberOfSamples);
+        }
 
         // Cancella eventuali canali di uscita senza ingresso.
         for (int channel = inputChannels;
@@ -270,11 +308,15 @@ public:
             return 0.0f;
         };
 
-        // Delay
+        //======================================================================
+        // Parametri del delay
+        //======================================================================
+
         const int delaySamples =
             juce::jlimit(
                 1,
-                static_cast<int>(sampleRate * 2.0),
+                static_cast<int>(
+                    sampleRate * 2.0),
                 static_cast<int>(
                     getParameter("delayTime")
                     * 0.001
@@ -292,39 +334,116 @@ public:
                 1.0f,
                 getParameter("delayMix"));
 
+        const float delayChaos =
+            juce::jlimit(
+                0.0f,
+                1.0f,
+                getParameter("delayChaos"));
+
+        //======================================================================
+        // Delay con modulazione imprevedibile
+        //======================================================================
+
         for (int sample = 0;
              sample < numberOfSamples;
              ++sample)
         {
+            const float sineModulation =
+                std::sin(modulationPhase);
+
+            // Genera un nuovo obiettivo casuale ogni 100 millisecondi.
+            if (randomCounter <= 0)
+            {
+                randomTarget =
+                    random.nextFloat() * 2.0f - 1.0f;
+
+                randomCounter =
+                    static_cast<int>(
+                        sampleRate * 0.1);
+            }
+
+            --randomCounter;
+
+            // Rende la variazione casuale graduale.
+            randomValue +=
+                0.0025f
+                * (randomTarget - randomValue);
+
+            // A valori bassi prevale la sinusoide.
+            // A valori alti aumenta la componente casuale.
+            const float modulation =
+                sineModulation * (1.0f - delayChaos)
+                + randomValue * delayChaos;
+
+            // Variazione massima pari al 20% del tempo di delay.
+            const float modulationRange =
+                static_cast<float>(
+                    delaySamples)
+                * 0.20f;
+
+            const float modulatedDelay =
+                juce::jlimit(
+                    1.0f,
+                    static_cast<float>(
+                        sampleRate * 2.0 - 1.0),
+                    static_cast<float>(
+                        delaySamples)
+                    + modulation
+                      * modulationRange
+                      * delayChaos);
+
             for (int channel = 0;
                  channel < channelsToProcess;
                  ++channel)
             {
                 const float dry =
-                    buffer.getSample(channel, sample);
+                    buffer.getSample(
+                        channel,
+                        sample);
 
-                const float wet =
+                const float delayed =
                     delay.popSample(
                         channel,
-                        static_cast<float>(
-                            delaySamples));
+                        modulatedDelay);
+
+                const float feedbackSample =
+                    dry
+                    + delayed * delayFeedback;
 
                 delay.pushSample(
                     channel,
-                    dry + wet * delayFeedback);
+                    feedbackSample);
 
                 const float output =
                     dry * (1.0f - delayMix)
-                    + wet * delayMix;
+                    + delayed * delayMix;
 
                 buffer.setSample(
                     channel,
                     sample,
                     output);
             }
+
+            // Frequenza fissa della modulazione:
+            // circa 0.35 Hz.
+            modulationPhase +=
+                juce::MathConstants<float>::twoPi
+                * 0.35f
+                / static_cast<float>(
+                    sampleRate);
+
+            if (modulationPhase >=
+                juce::MathConstants<float>::twoPi)
+            {
+                modulationPhase -=
+                    juce::MathConstants<float>::twoPi;
+            }
         }
 
+        //======================================================================
         // Filtri
+        //======================================================================
+
         lowPass.setCutoffFrequency(
             juce::jlimit(
                 20.0f,
@@ -337,7 +456,13 @@ public:
                 5000.0f,
                 getParameter("hpCutoff")));
 
-        juce::dsp::AudioBlock<float> audioBlock(buffer);
+        auto audioBlock =
+            juce::dsp::AudioBlock<float>(
+                buffer)
+                .getSubsetChannelBlock(
+                    0,
+                    static_cast<size_t>(
+                        channelsToProcess));
 
         juce::dsp::ProcessContextReplacing<float>
             filterContext(audioBlock);
@@ -345,7 +470,10 @@ public:
         lowPass.process(filterContext);
         highPass.process(filterContext);
 
+        //======================================================================
         // Distorsione
+        //======================================================================
+
         const float tone =
             juce::jlimit(
                 0.0f,
@@ -357,12 +485,6 @@ public:
                 0.0f,
                 1.0f,
                 getParameter("distAmount"));
-
-        const float distortionMix =
-            juce::jlimit(
-                0.0f,
-                1.0f,
-                getParameter("distMix"));
 
         const float drive =
             1.0f + 15.0f * amount;
@@ -381,19 +503,17 @@ public:
                  sample < numberOfSamples;
                  ++sample)
             {
-                const float dry = data[sample];
-
-                const float distorted =
-                    std::tanh(dry * drive)
-                    * toneGain;
-
                 data[sample] =
-                    dry * (1.0f - distortionMix)
-                    + distorted * distortionMix;
+                    std::tanh(
+                        data[sample] * drive)
+                    * toneGain;
             }
         }
 
+        //======================================================================
         // Compressore
+        //======================================================================
+
         const float inputGain =
             juce::Decibels::decibelsToGain(
                 juce::jmap(
@@ -410,13 +530,15 @@ public:
             std::exp(
                 -1.0f
                 / (0.010f
-                   * static_cast<float>(sampleRate)));
+                   * static_cast<float>(
+                       sampleRate)));
 
         const float release =
             std::exp(
                 -1.0f
                 / (0.350f
-                   * static_cast<float>(sampleRate)));
+                   * static_cast<float>(
+                       sampleRate)));
 
         for (int sample = 0;
              sample < numberOfSamples;
@@ -481,14 +603,16 @@ public:
             }
         }
 
-        // Dry/Wet globale
+        //======================================================================
+        // Dry/wet globale e volume
+        //======================================================================
+
         const float globalDryWet =
             juce::jlimit(
                 0.0f,
                 1.0f,
                 getParameter("globalDryWet"));
 
-        // Volume globale da -12 dB a +12 dB
         const float outputGain =
             juce::Decibels::decibelsToGain(
                 getParameter("outputGain"));
@@ -521,16 +645,20 @@ public:
         }
     }
 
-    juce::AudioProcessorEditor* createEditor() override
-    {
-        return nullptr;
-    }
+    //==========================================================================
+   juce::AudioProcessorEditor* createEditor() override
+{
+    return new juce::GenericAudioProcessorEditor(
+        *this);
+}
 
-    bool hasEditor() const override
-    {
-        return false;
-    }
+bool hasEditor() const override
+{
+    return true;
+}
 
+
+    //==========================================================================
     const juce::String getName() const override
     {
         return "Minimal Chain";
@@ -556,6 +684,7 @@ public:
         return 2.0;
     }
 
+    //==========================================================================
     int getNumPrograms() override
     {
         return 1;
@@ -581,6 +710,7 @@ public:
     {
     }
 
+    //==========================================================================
     void getStateInformation(
         juce::MemoryBlock& destinationData) override
     {
@@ -612,20 +742,40 @@ public:
     }
 
 private:
+    //==========================================================================
     juce::AudioProcessorValueTreeState parameters;
 
     juce::AudioBuffer<float> dryBuffer;
 
-    juce::dsp::DelayLine<float> delay{ 200000 };
+    juce::dsp::DelayLine<float> delay{
+        200000
+    };
 
-    juce::dsp::StateVariableTPTFilter<float> lowPass;
-    juce::dsp::StateVariableTPTFilter<float> highPass;
+    juce::dsp::StateVariableTPTFilter<float>
+        lowPass;
+
+    juce::dsp::StateVariableTPTFilter<float>
+        highPass;
 
     double sampleRate = 44100.0;
+
+    // Parametri della modulazione.
+    float modulationPhase = 0.0f;
+    float randomValue = 0.0f;
+    float randomTarget = 0.0f;
+
+    int randomCounter = 0;
+
+    juce::Random random;
+
+    // Stato del compressore.
     float envelope = 0.0f;
 };
 
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
+//==============================================================================
+
+juce::AudioProcessor* JUCE_CALLTYPE
+createPluginFilter()
 {
     return new MinimalChainAudioProcessor();
 }
