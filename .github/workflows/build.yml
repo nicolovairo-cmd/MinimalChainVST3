@@ -1,4 +1,4 @@
-name: Build Minimal Chain VST3
+name: Build Cloud Making Machine VST3
 
 on:
   workflow_dispatch:
@@ -42,13 +42,13 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: MinimalChain-Windows-VST3
+          name: CloudMakingMachine-Windows-VST3
           path: artifact
 
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: MinimalChain-build-log
+          name: CloudMakingMachine-build-log
           path: build.log
           if-no-files-found: ignore
