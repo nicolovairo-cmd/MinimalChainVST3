@@ -30,6 +30,43 @@ public:
 
     //==========================================================================
     static juce::AudioProcessorValueTreeState::ParameterLayout
+static juce::NormalisableRange<float> makeLogRange(
+    float minimum,
+    float maximum,
+    float interval = 0.01f)
+{
+    return juce::NormalisableRange<float>(
+        minimum,
+        maximum,
+        interval,
+
+        // Valore reale -> valore normalizzato
+        [minimum, maximum](
+            float start,
+            float end,
+            float value)
+        {
+            juce::ignoreUnused(start, end);
+
+            return std::log(value / minimum)
+                / std::log(maximum / minimum);
+        },
+
+        // Valore normalizzato -> valore reale
+        [minimum, maximum](
+            float start,
+            float end,
+            float normalised)
+        {
+            juce::ignoreUnused(start, end);
+
+            return minimum
+                * std::pow(
+                    maximum / minimum,
+                    normalised);
+        });
+}
+
     createParameterLayout()
     {
         using FloatParameter =
@@ -40,15 +77,14 @@ public:
             parameterList;
 
         parameterList.push_back(
-            std::make_unique<FloatParameter>(
-                "delayTime",
-"Time",
-juce::NormalisableRange<float>(
-    1.0f,
-    2000.0f,
-    0.0f,
-    0.3f),
-350.0f));
+    std::make_unique<FloatParameter>(
+        "delayTime",
+        "Delay Time",
+        makeLogRange(
+            1.0f,
+            2000.0f,
+            0.01f),
+        350.0f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -77,26 +113,24 @@ juce::NormalisableRange<float>(
                 0.20f));
 
         parameterList.push_back(
-            std::make_unique<FloatParameter>(
-                "lpCutoff",
-"Low Pass",
-juce::NormalisableRange<float>(
-    20.0f,
-    20000.0f,
-    0.0f,
-    0.3f),
-15000.0f));
+    std::make_unique<FloatParameter>(
+        "lpCutoff",
+        "Low Pass",
+        makeLogRange(
+            20.0f,
+            20000.0f,
+            0.01f),
+        12000.0f));
 
         parameterList.push_back(
-            std::make_unique<FloatParameter>(
-                "hpCutoff",
-"High Pass",
-juce::NormalisableRange<float>(
-    20.0f,
-    5000.0f,
-    0.0f,
-    0.3f),
-900.0f));
+    std::make_unique<FloatParameter>(
+        "hpCutoff",
+        "High Pass",
+        makeLogRange(
+            20.0f,
+            5000.0f,
+            0.01f),
+        40.0f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -104,7 +138,7 @@ juce::NormalisableRange<float>(
                 "Distortion Tone",
                 0.0f,
                 1.0f,
-                0.80f));
+                0.5f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -112,7 +146,7 @@ juce::NormalisableRange<float>(
                 "Distortion Amount",
                 0.0f,
                 1.0f,
-                0.12f));
+                0.15f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -120,7 +154,7 @@ juce::NormalisableRange<float>(
                 "Compressor Input",
                 0.0f,
                 1.0f,
-                0.50f));
+                0.5f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -136,7 +170,7 @@ juce::NormalisableRange<float>(
                 "Global Dry Wet",
                 0.0f,
                 1.0f,
-                0.50f));
+                1.0f));
 
         parameterList.push_back(
             std::make_unique<FloatParameter>(
@@ -652,16 +686,17 @@ juce::NormalisableRange<float>(
     }
 
     //==========================================================================
-    juce::AudioProcessorEditor* createEditor() override
-    {
-        return new juce::GenericAudioProcessorEditor(
-            *this);
-    }
+   juce::AudioProcessorEditor* createEditor() override
+{
+    return new juce::GenericAudioProcessorEditor(
+        *this);
+}
 
-    bool hasEditor() const override
-    {
-        return true;
-    }
+bool hasEditor() const override
+{
+    return true;
+}
+
 
     //==========================================================================
     const juce::String getName() const override
